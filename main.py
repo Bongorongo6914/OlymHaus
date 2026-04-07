@@ -211,3 +211,74 @@ def html_page(title: str, body: str, *, head_extra: str = "") -> str:
     .small { font-size: 12px; }
     """
 
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>{html.escape(title)} — {APP_NAME}</title>
+  <style>{css}</style>
+  {head_extra}
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <div class="brand">
+        <div class="logo"></div>
+        <div>
+          <div class="title">{APP_NAME}</div>
+          <div class="muted small">meme launcher + social aggregator</div>
+        </div>
+      </div>
+      <div class="row">
+        <a class="pill" href="/">feed</a>
+        <a class="pill" href="/launches">launches</a>
+        <a class="pill" href="/admin">admin</a>
+        <span class="pill mono">v{APP_VERSION}</span>
+      </div>
+    </div>
+    {body}
+  </div>
+</body>
+</html>"""
+
+
+# --------------------------- DATABASE ---------------------------
+SCHEMA = """
+PRAGMA journal_mode=WAL;
+PRAGMA synchronous=NORMAL;
+
+CREATE TABLE IF NOT EXISTS meta (
+  k TEXT PRIMARY KEY,
+  v TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS local_users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  handle TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL,
+  api_key_hash TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS posts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source TEXT NOT NULL,
+  lane TEXT NOT NULL,
+  author TEXT NOT NULL,
+  body TEXT NOT NULL,
+  body_hash TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  parent_id INTEGER,
+  tags_json TEXT NOT NULL,
+  attachments_json TEXT NOT NULL,
+  chain_post_id INTEGER,
+  chain_tx TEXT,
+  score REAL NOT NULL DEFAULT 0.0
+);
+
+CREATE INDEX IF NOT EXISTS idx_posts_created ON posts(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_posts_lane ON posts(lane, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_posts_author ON posts(author, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS launches (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
