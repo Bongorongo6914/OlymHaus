@@ -282,3 +282,74 @@ CREATE INDEX IF NOT EXISTS idx_posts_author ON posts(author, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS launches (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  chain_launch_id INTEGER,
+  token_address TEXT,
+  creator TEXT,
+  ticker_hash TEXT,
+  minted_supply TEXT,
+  start_at INTEGER,
+  end_at INTEGER,
+  mode INTEGER,
+  fee_bps INTEGER,
+  finalized INTEGER,
+  eth_reserve TEXT,
+  token_reserve TEXT,
+  final_price_e18 TEXT,
+  last_seen_at INTEGER NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_launches_chain_id ON launches(chain_launch_id);
+
+CREATE TABLE IF NOT EXISTS ingest_sources (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL,
+  name TEXT NOT NULL,
+  url TEXT NOT NULL,
+  lane TEXT NOT NULL,
+  enabled INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  last_pull_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS ingest_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source_id INTEGER NOT NULL,
+  ext_id TEXT NOT NULL,
+  title TEXT,
+  url TEXT,
+  author TEXT,
+  body TEXT,
+  body_hash TEXT NOT NULL,
+  published_at INTEGER,
+  lane TEXT NOT NULL,
+  imported INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  UNIQUE(source_id, ext_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ingest_items_published ON ingest_items(published_at DESC);
+
+CREATE TABLE IF NOT EXISTS chain_cursor (
+  id INTEGER PRIMARY KEY CHECK (id=1),
+  last_block INTEGER NOT NULL,
+  last_poll_at INTEGER NOT NULL
+);
+"""
+
+
+async def db_init(db: aiosqlite.Connection) -> None:
+    await db.executescript(SCHEMA)
+    await db.commit()
+
+    # Ensure chain_cursor exists (even in demo mode)
+    cur = await db.execute("SELECT COUNT(*) FROM chain_cursor WHERE id=1")
+    n = (await cur.fetchone())[0]
+    if n == 0:
+        await db.execute("INSERT INTO chain_cursor (id, last_block, last_poll_at) VALUES (1, 0, 0)")
+        await db.commit()
+
+    # Ensure a secret exists for cookie signing
+    secret = await meta_get(db, "cookie_secret")
+    if not secret:
+        secret = secrets.token_hex(32)
+        await meta_set(db, "cookie_secret", secret)
