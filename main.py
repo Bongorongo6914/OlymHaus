@@ -140,3 +140,74 @@ def guess_lane_from_text(text: str) -> str:
         return "alpha"
     if any(k in t0 for k in ["meme", "gm", "lol", "lmao", "ngmi", "wagmi", "based", "cringe"]):
         return "memes"
+    if any(k in t0 for k in ["security", "audit", "cve", "exploit", "hack", "reentrancy"]):
+        return "sec"
+    if any(k in t0 for k in ["irl", "life", "walk", "coffee", "gym"]):
+        return "irl"
+    return "general"
+
+
+def html_page(title: str, body: str, *, head_extra: str = "") -> str:
+    css = """
+    :root {
+      --bg: #0b0d13;
+      --panel: #101525;
+      --muted: #8aa0b8;
+      --text: #e8f0ff;
+      --brand: #b6ff3b;
+      --brand2: #3be0ff;
+      --danger: #ff4d67;
+      --warn: #ffcc66;
+      --line: rgba(255,255,255,0.10);
+      --chip: rgba(182,255,59,0.12);
+      --shadow: 0 20px 70px rgba(0,0,0,0.55);
+    }
+    body { background: radial-gradient(1000px 700px at 15% 10%, rgba(59,224,255,0.12), transparent 40%),
+                    radial-gradient(900px 700px at 70% 0%, rgba(182,255,59,0.10), transparent 45%),
+                    var(--bg);
+           color: var(--text); font-family: ui-sans-serif, system-ui, Segoe UI, Arial;
+           margin: 0; padding: 0; }
+    a { color: var(--brand2); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .wrap { max-width: 1120px; margin: 0 auto; padding: 28px 18px 80px; }
+    .topbar { display:flex; gap:12px; align-items:center; justify-content:space-between; padding: 12px 16px;
+              background: rgba(16,21,37,0.75); border: 1px solid var(--line); border-radius: 16px;
+              box-shadow: var(--shadow); backdrop-filter: blur(10px); position: sticky; top: 10px; z-index: 20; }
+    .brand { display:flex; gap:10px; align-items:center; }
+    .logo { width: 28px; height: 28px; border-radius: 9px;
+            background: linear-gradient(135deg, var(--brand2), var(--brand)); box-shadow: 0 12px 40px rgba(59,224,255,0.18); }
+    .title { font-weight: 820; letter-spacing: 0.2px; }
+    .pill { font-size: 12px; color: var(--muted); padding: 6px 10px; border: 1px solid var(--line);
+            border-radius: 999px; background: rgba(255,255,255,0.03); }
+    .grid { display:grid; grid-template-columns: 1.25fr 0.85fr; gap: 16px; margin-top: 16px; }
+    @media (max-width: 940px) { .grid { grid-template-columns: 1fr; } }
+    .card { background: rgba(16,21,37,0.70); border: 1px solid var(--line); border-radius: 18px;
+            box-shadow: var(--shadow); overflow:hidden; }
+    .card .hd { padding: 14px 16px; border-bottom: 1px solid var(--line); display:flex; align-items:center; justify-content:space-between; }
+    .card .hd h2 { margin:0; font-size: 14px; letter-spacing: 0.35px; text-transform: uppercase; color: var(--muted); }
+    .card .bd { padding: 14px 16px; }
+    .btn { display:inline-block; cursor:pointer; padding: 10px 12px; border-radius: 12px;
+           border: 1px solid var(--line); background: rgba(255,255,255,0.03); color: var(--text); font-weight: 700; }
+    .btn:hover { background: rgba(255,255,255,0.06); }
+    .btn.primary { border-color: rgba(182,255,59,0.35); background: rgba(182,255,59,0.12); }
+    .btn.danger { border-color: rgba(255,77,103,0.35); background: rgba(255,77,103,0.10); }
+    .row { display:flex; gap: 10px; flex-wrap: wrap; }
+    input, textarea, select { width: 100%; box-sizing: border-box; padding: 10px 12px;
+            background: rgba(0,0,0,0.20); border: 1px solid var(--line); border-radius: 12px; color: var(--text); }
+    textarea { min-height: 110px; resize: vertical; }
+    .muted { color: var(--muted); }
+    .hr { height: 1px; background: var(--line); margin: 14px 0; }
+    .chip { display:inline-block; padding: 4px 10px; border-radius: 999px; border: 1px solid rgba(182,255,59,0.28);
+            background: var(--chip); color: var(--brand); font-size: 12px; font-weight: 750; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
+    .post { border: 1px solid var(--line); border-radius: 16px; padding: 12px; margin-bottom: 10px;
+            background: rgba(0,0,0,0.16); }
+    .post .meta { display:flex; gap: 10px; align-items:center; justify-content:space-between; }
+    .post .who { font-weight: 800; }
+    .post .txt { margin-top: 8px; white-space: pre-wrap; line-height: 1.35; }
+    .k { color: var(--muted); font-weight: 700; }
+    .v { color: var(--text); font-weight: 820; }
+    .kv { display:grid; grid-template-columns: 120px 1fr; gap: 6px 12px; }
+    .small { font-size: 12px; }
+    """
+
