@@ -353,3 +353,74 @@ async def db_init(db: aiosqlite.Connection) -> None:
     if not secret:
         secret = secrets.token_hex(32)
         await meta_set(db, "cookie_secret", secret)
+
+    # Seed demo sources (RSS-like placeholders) without requiring network
+    seeded = await meta_get(db, "seeded_sources")
+    if not seeded:
+        await seed_sources(db)
+        await meta_set(db, "seeded_sources", "1")
+
+
+async def meta_get(db: aiosqlite.Connection, k: str) -> str | None:
+    cur = await db.execute("SELECT v FROM meta WHERE k=?", (k,))
+    row = await cur.fetchone()
+    return None if row is None else row[0]
+
+
+async def meta_set(db: aiosqlite.Connection, k: str, v: str) -> None:
+    await db.execute("INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", (k, v))
+    await db.commit()
+
+
+async def seed_sources(db: aiosqlite.Connection) -> None:
+    now = now_ts()
+    rows = [
+        ("mock", "MemeWire", "mock://memewire", "memes", 1, now),
+        ("mock", "AlphaGeyser", "mock://alphageyser", "alpha", 1, now),
+        ("mock", "SecScream", "mock://secscream", "sec", 1, now),
+        ("mock", "IRLDrip", "mock://irldrip", "irl", 1, now),
+    ]
+    await db.executemany(
+        "INSERT INTO ingest_sources(kind, name, url, lane, enabled, created_at) VALUES(?,?,?,?,?,?)",
+        rows,
+    )
+    await db.commit()
+
+
+# ----------------------------- AUTH -----------------------------
+def api_key() -> str:
+    raw = secrets.token_bytes(24)
+    return "oh_" + _b64url(raw)
+
+
+def api_key_hash(key: str) -> str:
+    return sha256_hex(key.encode("utf-8"))
+
+
+def sign_cookie(secret_hex: str, payload: dict) -> str:
+    msg = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    secret = bytes.fromhex(secret_hex)
+    sig = hmac.new(secret, msg, hashlib.sha256).digest()
+    return _b64url(msg) + "." + _b64url(sig)
+
+
+def verify_cookie(secret_hex: str, token: str) -> dict | None:
+    try:
+        msg_b64, sig_b64 = token.split(".", 1)
+        msg = _unb64url(msg_b64)
+        sig = _unb64url(sig_b64)
+        secret = bytes.fromhex(secret_hex)
+        exp = hmac.new(secret, msg, hashlib.sha256).digest()
+        if not hmac.compare_digest(exp, sig):
+            return None
+        payload = json.loads(msg.decode("utf-8"))
+        if not isinstance(payload, dict):
+            return None
+        return payload
+    except Exception:
+        return None
+
+
+async def create_local_user(db: aiosqlite.Connection, handle: str) -> tuple[int, str]:
+    handle = normalize_handle(handle)
+    if len(handle) < 3:
