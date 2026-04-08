@@ -708,3 +708,74 @@ async def list_posts(
                 "chain_tx": r[11],
                 "score": r[12],
             }
+        )
+    return out
+
+
+async def list_lanes(db: aiosqlite.Connection) -> list[dict]:
+    cur = await db.execute(
+        "SELECT lane, COUNT(*) AS c FROM posts GROUP BY lane ORDER BY c DESC, lane ASC LIMIT 30"
+    )
+    rows = await cur.fetchall()
+    return [{"lane": r[0], "count": r[1]} for r in rows]
+
+
+# ------------------------ CHAIN (OPT) ------------------------
+GOHO_ABI_MIN = [
+    {
+        "anonymous": False,
+        "inputs": [
+            {"indexed": True, "internalType": "uint256", "name": "postId", "type": "uint256"},
+            {"indexed": True, "internalType": "address", "name": "author", "type": "address"},
+            {"indexed": True, "internalType": "uint256", "name": "parentId", "type": "uint256"},
+            {"indexed": False, "internalType": "bytes32", "name": "lane", "type": "bytes32"},
+            {"indexed": False, "internalType": "bytes32", "name": "contentHash", "type": "bytes32"},
+            {"indexed": False, "internalType": "uint64", "name": "flags", "type": "uint64"},
+            {"indexed": False, "internalType": "uint64", "name": "createdAt", "type": "uint64"},
+        ],
+        "name": "GH_Post",
+        "type": "event",
+    },
+    {
+        "anonymous": False,
+        "inputs": [
+            {"indexed": True, "internalType": "uint256", "name": "launchId", "type": "uint256"},
+            {"indexed": True, "internalType": "address", "name": "token", "type": "address"},
+            {"indexed": True, "internalType": "address", "name": "creator", "type": "address"},
+            {"indexed": False, "internalType": "bytes32", "name": "tickerHash", "type": "bytes32"},
+            {"indexed": False, "internalType": "uint256", "name": "mintedSupply", "type": "uint256"},
+            {"indexed": False, "internalType": "uint256", "name": "startAt", "type": "uint256"},
+            {"indexed": False, "internalType": "uint256", "name": "endAt", "type": "uint256"},
+        ],
+        "name": "GH_LaunchCreated",
+        "type": "event",
+    },
+]
+
+
+@dataclasses.dataclass
+class ChainCtx:
+    w3: t.Any
+    contract: t.Any
+    ok: bool
+    why: str
+
+
+def chain_ctx() -> ChainCtx:
+    if DEMO_MODE:
+        return ChainCtx(None, None, False, "demo mode (no web3 / rpc / contract address)")
+    assert Web3 is not None
+    w3 = Web3(Web3.HTTPProvider(RPC_URL))
+    if not w3.is_connected():
+        return ChainCtx(None, None, False, "rpc not reachable")
+    try:
+        ca = Web3.to_checksum_address(CONTRACT_ADDRESS)  # type: ignore
+    except Exception:
+        return ChainCtx(None, None, False, "bad contract address")
+    c = w3.eth.contract(address=ca, abi=GOHO_ABI_MIN)
+    return ChainCtx(w3, c, True, "ok")
+
+
+async def chain_poll_loop(app: FastAPI) -> None:
+    while True:
+        try:
