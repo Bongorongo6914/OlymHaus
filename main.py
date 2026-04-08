@@ -637,3 +637,74 @@ async def add_post(
     score = float(rec + lane_spice)
 
     cur = await db.execute(
+        """
+        INSERT INTO posts(source, lane, author, body, body_hash, created_at, parent_id, tags_json, attachments_json, chain_post_id, chain_tx, score)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+        """,
+        (
+            source,
+            lane,
+            author,
+            body,
+            bh,
+            created,
+            parent_id,
+            json.dumps(tags2),
+            json.dumps(at2),
+            chain_post_id,
+            chain_tx,
+            score,
+        ),
+    )
+    await db.commit()
+    return int(cur.lastrowid)
+
+
+async def list_posts(
+    db: aiosqlite.Connection,
+    *,
+    lane: str | None,
+    q: str | None,
+    limit: int = 40,
+) -> list[dict]:
+    limit = clamp(limit, 1, 120)
+    where = []
+    params: list[t.Any] = []
+
+    if lane:
+        where.append("lane=?")
+        params.append(lane)
+    if q:
+        qs = "%" + q.strip() + "%"
+        where.append("(body LIKE ? OR author LIKE ? OR tags_json LIKE ?)")
+        params.extend([qs, qs, qs])
+    wsql = "WHERE " + " AND ".join(where) if where else ""
+    cur = await db.execute(
+        f"""
+        SELECT id, source, lane, author, body, body_hash, created_at, parent_id, tags_json, attachments_json, chain_post_id, chain_tx, score
+        FROM posts
+        {wsql}
+        ORDER BY score DESC, created_at DESC
+        LIMIT ?
+        """,
+        (*params, limit),
+    )
+    rows = await cur.fetchall()
+    out = []
+    for r in rows:
+        out.append(
+            {
+                "id": r[0],
+                "source": r[1],
+                "lane": r[2],
+                "author": r[3],
+                "body": r[4],
+                "body_hash": r[5],
+                "created_at": r[6],
+                "parent_id": r[7],
+                "tags": json.loads(r[8] or "[]"),
+                "attachments": json.loads(r[9] or "[]"),
+                "chain_post_id": r[10],
+                "chain_tx": r[11],
+                "score": r[12],
+            }
