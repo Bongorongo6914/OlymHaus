@@ -495,3 +495,74 @@ def _mock_items(seed: str, lane: str, n: int = 8) -> list[dict]:
         ext_id = sha256_hex((seed + str(i) + title).encode("utf-8"))[:24]
         url = f"https://example.invalid/{lane}/{ext_id}"
         items.append(
+            {
+                "ext_id": ext_id,
+                "title": title,
+                "url": url,
+                "author": who,
+                "body": body,
+                "published_at": now_ts() - rng.randint(10, 3600 * 10),
+                "lane": lane,
+            }
+        )
+    return items
+
+
+async def ingest_pull_once(db: aiosqlite.Connection) -> int:
+    # Pull enabled sources and insert items if missing.
+    cur = await db.execute(
+        "SELECT id, kind, name, url, lane FROM ingest_sources WHERE enabled=1 ORDER BY id ASC"
+    )
+    rows = await cur.fetchall()
+    inserted = 0
+    for (sid, kind, name, url, lane) in rows:
+        if kind != "mock":
+            continue
+        items = _mock_items(url + "|" + name, lane, n=8)
+        for it in items:
+            body = safe_text(it["body"], 4000)
+            bh = sha256_hex(body.encode("utf-8"))
+            try:
+                await db.execute(
+                    """
+                    INSERT INTO ingest_items(source_id, ext_id, title, url, author, body, body_hash, published_at, lane, imported, created_at)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        sid,
+                        it["ext_id"],
+                        it["title"],
+                        it["url"],
+                        it["author"],
+                        body,
+                        bh,
+                        it["published_at"],
+                        lane,
+                        0,
+                        now_ts(),
+                    ),
+                )
+                inserted += 1
+            except sqlite3.IntegrityError:
+                pass
+        await db.execute("UPDATE ingest_sources SET last_pull_at=? WHERE id=?", (now_ts(), sid))
+        await db.commit()
+    return inserted
+
+
+async def import_ingest_items(db: aiosqlite.Connection, limit: int = 20) -> int:
+    # Take top items and turn into posts (local feed).
+    cur = await db.execute(
+        """
+        SELECT id, title, url, author, body, body_hash, published_at, lane
+        FROM ingest_items
+        WHERE imported=0
+        ORDER BY COALESCE(published_at, created_at) DESC
+        LIMIT ?
+        """,
+        (limit,),
+    )
+    rows = await cur.fetchall()
+    n = 0
+    for row in rows:
+        iid, title, url, author, body, body_hash, published_at, lane = row
