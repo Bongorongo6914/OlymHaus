@@ -424,3 +424,74 @@ def verify_cookie(secret_hex: str, token: str) -> dict | None:
 async def create_local_user(db: aiosqlite.Connection, handle: str) -> tuple[int, str]:
     handle = normalize_handle(handle)
     if len(handle) < 3:
+        raise ValueError("handle too short")
+    key = api_key()
+    h = api_key_hash(key)
+    now = now_ts()
+    cur = await db.execute(
+        "INSERT INTO local_users(handle, created_at, api_key_hash) VALUES(?,?,?)",
+        (handle, now, h),
+    )
+    await db.commit()
+    return int(cur.lastrowid), key
+
+
+async def auth_user_by_api_key(db: aiosqlite.Connection, key: str) -> dict | None:
+    if not key or not key.startswith("oh_"):
+        return None
+    h = api_key_hash(key)
+    cur = await db.execute("SELECT id, handle, created_at FROM local_users WHERE api_key_hash=?", (h,))
+    row = await cur.fetchone()
+    if row is None:
+        return None
+    return {"id": row[0], "handle": row[1], "created_at": row[2]}
+
+
+# -------------------------- MODELS --------------------------
+class PostIn(BaseModel):
+    author: str = Field(..., min_length=2, max_length=64)
+    body: str = Field(..., min_length=1, max_length=4000)
+    lane: str | None = Field(None, max_length=32)
+    parent_id: int | None = None
+    tags: list[str] = Field(default_factory=list, max_length=20)
+    attachments: list[dict] = Field(default_factory=list, max_length=10)
+    push_chain: bool = False
+
+
+class SourceIn(BaseModel):
+    kind: str = Field(..., max_length=16)
+    name: str = Field(..., max_length=80)
+    url: str = Field(..., max_length=400)
+    lane: str = Field(..., max_length=32)
+    enabled: bool = True
+
+
+class LaunchCreateIn(BaseModel):
+    name: str = Field(..., min_length=1, max_length=64)
+    symbol: str = Field(..., min_length=1, max_length=16)
+    supply: int = Field(..., ge=100_000, le=10_000_000_000)
+    ticker: str = Field(..., min_length=1, max_length=32)
+    minutes: int = Field(120, ge=10, le=60 * 24 * 7)
+    mode: str = Field("fixed")
+    start_price: float = Field(0.000001, gt=0.0, le=3000000.0)
+    fee_bps: int = Field(137, ge=0, le=999)
+
+
+# ------------------------ MOCK INGEST ------------------------
+def _mock_items(seed: str, lane: str, n: int = 8) -> list[dict]:
+    rng = random.Random(seed + "|" + lane + "|" + str(int(time.time() // 3600)))
+    verbs = ["apes", "deploys", "cooks", "dunks", "speedruns", "summons", "front-runs", "resurrects", "mints", "ships"]
+    nouns = ["frogs", "cats", "whales", "charts", "memes", "audits", "threads", "bags", "lanes", "portals"]
+    moods = ["based", "cursed", "radiant", "sus", "glorious", "unhinged", "liquid", "spicy", "chill", "volatile"]
+    items: list[dict] = []
+    for i in range(n):
+        who = rng.choice(["pilto", "anon", "capy", "owl", "haus", "goho", "glitch", "relay", "snek", "catdad"])
+        title = f"{who} {rng.choice(verbs)} {rng.choice(nouns)} ({rng.choice(moods)})"
+        body = (
+            f"{title}\n\n"
+            f"lane={lane} | pulse={rng.randint(1, 999)} | spice={rng.randint(11, 9999)}\n"
+            f"signal: {rng.choice(['WAGMI', 'NGMI', 'DYOR', 'NFA', 'GM', 'GNGMI', 'fr fr'])}\n"
+        )
+        ext_id = sha256_hex((seed + str(i) + title).encode("utf-8"))[:24]
+        url = f"https://example.invalid/{lane}/{ext_id}"
+        items.append(
