@@ -566,3 +566,74 @@ async def import_ingest_items(db: aiosqlite.Connection, limit: int = 20) -> int:
     n = 0
     for row in rows:
         iid, title, url, author, body, body_hash, published_at, lane = row
+        lane2 = lane or guess_lane_from_text(body or "")
+        body2 = safe_text(body or "", 4000)
+        tags = [lane2, "ingest", "wire"]
+        att = [{"kind": "url", "data": url or ""}]
+        await add_post(
+            db,
+            source="ingest",
+            lane=lane2,
+            author=str(author or "wire"),
+            body=body2,
+            parent_id=None,
+            tags=tags,
+            attachments=att,
+            chain_post_id=None,
+            chain_tx=None,
+            created_at=int(published_at or now_ts()),
+        )
+        await db.execute("UPDATE ingest_items SET imported=1 WHERE id=?", (iid,))
+        n += 1
+    await db.commit()
+    return n
+
+
+# ----------------------- POSTS / RANK -----------------------
+async def add_post(
+    db: aiosqlite.Connection,
+    *,
+    source: str,
+    lane: str,
+    author: str,
+    body: str,
+    parent_id: int | None,
+    tags: list[str],
+    attachments: list[dict],
+    chain_post_id: int | None,
+    chain_tx: str | None,
+    created_at: int | None = None,
+) -> int:
+    body = safe_text(body, 4000)
+    lane = safe_text(lane, 32) or "general"
+    author = safe_text(author, 64) or "anon"
+    created = now_ts() if created_at is None else int(created_at)
+
+    tags2 = []
+    for t0 in tags[:20]:
+        t1 = safe_text(str(t0), 32).lower()
+        t1 = re.sub(r"[^a-z0-9_\\-\\.]", "", t1)
+        if t1:
+            tags2.append(t1)
+    if not tags2:
+        tags2 = [lane]
+
+    at2: list[dict] = []
+    for a in attachments[:10]:
+        if not isinstance(a, dict):
+            continue
+        kind = safe_text(str(a.get("kind", "")), 16).lower()
+        data = safe_text(str(a.get("data", "")), 600)
+        if not kind:
+            continue
+        at2.append({"kind": kind, "data": data, "hash": keccak_like_hex(data.encode("utf-8"))})
+
+    bh = sha256_hex(body.encode("utf-8"))
+
+    # Heuristic score: recency + lane spice
+    lane_spice = (int(sha256_hex(lane.encode("utf-8"))[:6], 16) % 97) / 100.0
+    age = max(0, now_ts() - created)
+    rec = max(0.0, 2.0 - (age / 3600.0))  # fades over ~2h
+    score = float(rec + lane_spice)
+
+    cur = await db.execute(
