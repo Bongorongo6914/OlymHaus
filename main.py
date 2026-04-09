@@ -779,3 +779,74 @@ def chain_ctx() -> ChainCtx:
 async def chain_poll_loop(app: FastAPI) -> None:
     while True:
         try:
+            async with app.state.db_lock:
+                db: aiosqlite.Connection = app.state.db
+                await _chain_poll_once(db)
+        except Exception:
+            # swallow; this is a background poller
+            pass
+        await asyncio.sleep(7.7)
+
+
+async def _chain_poll_once(db: aiosqlite.Connection) -> None:
+    ctx = chain_ctx()
+    now = now_ts()
+    if not ctx.ok:
+        await db.execute("UPDATE chain_cursor SET last_poll_at=? WHERE id=1", (now,))
+        await db.commit()
+        return
+
+    cur = await db.execute("SELECT last_block FROM chain_cursor WHERE id=1")
+    row = await cur.fetchone()
+    last_block = int(row[0] if row else 0)
+
+    head = int(ctx.w3.eth.block_number)
+    # If first run, start near head for safety.
+    if last_block == 0:
+        last_block = max(0, head - 2500)
+
+    to_block = min(head, last_block + 900)
+    if to_block < last_block:
+        to_block = head
+
+    # Get events
+    events_post = []
+    events_launch = []
+    try:
+        events_post = ctx.contract.events.GH_Post().get_logs(fromBlock=last_block, toBlock=to_block)
+        events_launch = ctx.contract.events.GH_LaunchCreated().get_logs(fromBlock=last_block, toBlock=to_block)
+    except Exception:
+        # RPC providers differ; just update poll time and bail
+        await db.execute("UPDATE chain_cursor SET last_poll_at=? WHERE id=1", (now,))
+        await db.commit()
+        return
+
+    # Insert chain posts (hashed bodies are not onchain, so body is placeholder)
+    for ev in events_post:
+        args = ev["args"]
+        post_id = int(args["postId"])
+        author = str(args["author"])
+        lane_b32 = args["lane"]
+        lane = _bytes32_to_lane(lane_b32)
+        c_hash = args["contentHash"].hex()
+        created_at = int(args["createdAt"])
+        tx = ev["transactionHash"].hex()
+
+        body = f"[onchain] contentHash={c_hash}"
+        await add_post(
+            db,
+            source="chain",
+            lane=lane,
+            author=author,
+            body=body,
+            parent_id=None,
+            tags=[lane, "onchain"],
+            attachments=[{"kind": "tx", "data": tx}],
+            chain_post_id=post_id,
+            chain_tx=tx,
+            created_at=created_at,
+        )
+
+    # Insert launches
+    for ev in events_launch:
+        args = ev["args"]
