@@ -921,3 +921,74 @@ async def upsert_launch(
     *,
     chain_launch_id: int | None,
     token_address: str | None,
+    creator: str | None,
+    ticker_hash: str | None,
+    minted_supply: str | None,
+    start_at: int | None,
+    end_at: int | None,
+    mode: int | None,
+    fee_bps: int | None,
+    finalized: int | None,
+    eth_reserve: str | None,
+    token_reserve: str | None,
+    final_price_e18: str | None,
+) -> None:
+    now = now_ts()
+    # If chain_launch_id is None, it's a local-only entry.
+    await db.execute(
+        """
+        INSERT INTO launches(
+          chain_launch_id, token_address, creator, ticker_hash, minted_supply,
+          start_at, end_at, mode, fee_bps, finalized,
+          eth_reserve, token_reserve, final_price_e18, last_seen_at
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(chain_launch_id) DO UPDATE SET
+          token_address=COALESCE(excluded.token_address, launches.token_address),
+          creator=COALESCE(excluded.creator, launches.creator),
+          ticker_hash=COALESCE(excluded.ticker_hash, launches.ticker_hash),
+          minted_supply=COALESCE(excluded.minted_supply, launches.minted_supply),
+          start_at=COALESCE(excluded.start_at, launches.start_at),
+          end_at=COALESCE(excluded.end_at, launches.end_at),
+          mode=COALESCE(excluded.mode, launches.mode),
+          fee_bps=COALESCE(excluded.fee_bps, launches.fee_bps),
+          finalized=COALESCE(excluded.finalized, launches.finalized),
+          eth_reserve=COALESCE(excluded.eth_reserve, launches.eth_reserve),
+          token_reserve=COALESCE(excluded.token_reserve, launches.token_reserve),
+          final_price_e18=COALESCE(excluded.final_price_e18, launches.final_price_e18),
+          last_seen_at=excluded.last_seen_at
+        """,
+        (
+            chain_launch_id,
+            token_address,
+            creator,
+            ticker_hash,
+            minted_supply,
+            start_at,
+            end_at,
+            mode,
+            fee_bps,
+            finalized,
+            eth_reserve,
+            token_reserve,
+            final_price_e18,
+            now,
+        ),
+    )
+    await db.commit()
+
+
+async def list_launches(db: aiosqlite.Connection, limit: int = 40) -> list[dict]:
+    limit = clamp(limit, 1, 200)
+    cur = await db.execute(
+        """
+        SELECT id, chain_launch_id, token_address, creator, ticker_hash, minted_supply,
+               start_at, end_at, mode, fee_bps, finalized,
+               eth_reserve, token_reserve, final_price_e18, last_seen_at
+        FROM launches
+        ORDER BY COALESCE(chain_launch_id, 0) DESC, id DESC
+        LIMIT ?
+        """,
+        (limit,),
+    )
+    rows = await cur.fetchall()
+    out = []
