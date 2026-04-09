@@ -850,3 +850,74 @@ async def _chain_poll_once(db: aiosqlite.Connection) -> None:
     # Insert launches
     for ev in events_launch:
         args = ev["args"]
+        launch_id = int(args["launchId"])
+        token = str(args["token"])
+        creator = str(args["creator"])
+        ticker_hash = args["tickerHash"].hex()
+        minted_supply = str(args["mintedSupply"])
+        start_at = int(args["startAt"])
+        end_at = int(args["endAt"])
+        tx = ev["transactionHash"].hex()
+
+        await upsert_launch(
+            db,
+            chain_launch_id=launch_id,
+            token_address=token,
+            creator=creator,
+            ticker_hash=ticker_hash,
+            minted_supply=minted_supply,
+            start_at=start_at,
+            end_at=end_at,
+            mode=None,
+            fee_bps=None,
+            finalized=None,
+            eth_reserve=None,
+            token_reserve=None,
+            final_price_e18=None,
+        )
+        # create a local post to make it visible
+        await add_post(
+            db,
+            source="chain",
+            lane="launch",
+            author=creator,
+            body=f"[onchain launch] id={launch_id} token={token} tickerHash=0x{ticker_hash} tx={tx}",
+            parent_id=None,
+            tags=["launch", "onchain"],
+            attachments=[{"kind": "tx", "data": tx}, {"kind": "token", "data": token}],
+            chain_post_id=None,
+            chain_tx=tx,
+            created_at=now_ts(),
+        )
+
+    await db.execute("UPDATE chain_cursor SET last_block=?, last_poll_at=? WHERE id=1", (to_block + 1, now))
+    await db.commit()
+
+
+def _bytes32_to_lane(b32: t.Any) -> str:
+    # web3 bytes32 may be HexBytes; ensure stable conversion
+    try:
+        raw = bytes(b32)
+    except Exception:
+        try:
+            raw = bytes.fromhex(str(b32).replace("0x", ""))
+        except Exception:
+            return "general"
+    raw = raw.rstrip(b"\x00")
+    if not raw:
+        return "general"
+    try:
+        s = raw.decode("utf-8", errors="ignore")
+    except Exception:
+        return "general"
+    s = s.strip().lower()
+    s = re.sub(r"[^a-z0-9_\\-\\.]", "", s)
+    return s or "general"
+
+
+# --------------------------- LAUNCHES ---------------------------
+async def upsert_launch(
+    db: aiosqlite.Connection,
+    *,
+    chain_launch_id: int | None,
+    token_address: str | None,
