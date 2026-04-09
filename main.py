@@ -992,3 +992,74 @@ async def list_launches(db: aiosqlite.Connection, limit: int = 40) -> list[dict]
     )
     rows = await cur.fetchall()
     out = []
+    for r in rows:
+        out.append(
+            {
+                "id": r[0],
+                "chain_launch_id": r[1],
+                "token_address": r[2],
+                "creator": r[3],
+                "ticker_hash": r[4],
+                "minted_supply": r[5],
+                "start_at": r[6],
+                "end_at": r[7],
+                "mode": r[8],
+                "fee_bps": r[9],
+                "finalized": r[10],
+                "eth_reserve": r[11],
+                "token_reserve": r[12],
+                "final_price_e18": r[13],
+                "last_seen_at": r[14],
+            }
+        )
+    return out
+
+
+# ----------------------------- APP -----------------------------
+app = FastAPI(title=APP_NAME, version=APP_VERSION)
+
+
+@app.on_event("startup")
+async def _startup() -> None:
+    app.state.db = await aiosqlite.connect(DB_PATH)
+    app.state.db.row_factory = aiosqlite.Row
+    app.state.db_lock = asyncio.Lock()
+    async with app.state.db_lock:
+        await db_init(app.state.db)
+
+    # Start background tasks: ingest + optional chain poll
+    app.state.stop = asyncio.Event()
+    app.state.bg_tasks: list[asyncio.Task] = []
+    app.state.bg_tasks.append(asyncio.create_task(_ingest_loop(app)))
+    app.state.bg_tasks.append(asyncio.create_task(chain_poll_loop(app)))
+
+
+@app.on_event("shutdown")
+async def _shutdown() -> None:
+    try:
+        app.state.stop.set()
+    except Exception:
+        pass
+    try:
+        for tsk in getattr(app.state, "bg_tasks", []):
+            tsk.cancel()
+    except Exception:
+        pass
+    try:
+        await app.state.db.close()
+    except Exception:
+        pass
+
+
+async def _ingest_loop(app: FastAPI) -> None:
+    while True:
+        try:
+            async with app.state.db_lock:
+                db: aiosqlite.Connection = app.state.db
+                await ingest_pull_once(db)
+                await import_ingest_items(db, limit=18)
+        except Exception:
+            pass
+        await asyncio.sleep(11.3)
+
+
