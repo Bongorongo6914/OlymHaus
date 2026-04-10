@@ -1276,3 +1276,74 @@ async def post_view(request: Request, post_id: int) -> str:
         kind = html.escape(str(a.get("kind", "")))
         data = html.escape(str(a.get("data", "")))
         h = html.escape(str(a.get("hash", ""))[:18])
+        if kind == "url" and data:
+            data_html = f'<a class="mono" href="{data}" target="_blank" rel="noreferrer">{data}</a>'
+        else:
+            data_html = f'<span class="mono">{data}</span>'
+        att_rows.append(f"<div class='kv'><div class='k'>{kind}</div><div class='v'>{data_html} <span class='muted mono'>{h}</span></div></div>")
+
+    chain_meta = ""
+    if p.get("chain_tx"):
+        chain_meta = f"<div class='pill mono'>tx={html.escape(str(p['chain_tx']))}</div>"
+    body = f"""
+    <div class="grid">
+      <div class="card">
+        <div class="hd">
+          <h2>post #{p['id']}</h2>
+          <div class="row">
+            <a class="pill" href="/">back</a>
+            <span class="pill mono">{html.escape(p['source'])}</span>
+            <span class="pill mono">{html.escape(p['lane'])}</span>
+            {chain_meta}
+          </div>
+        </div>
+        <div class="bd">
+          <div class="kv">
+            <div class="k">author</div><div class="v">{html.escape(p['author'])}</div>
+            <div class="k">created</div><div class="v mono">{iso(int(p['created_at']))}</div>
+            <div class="k">hash</div><div class="v mono">{html.escape(str(p['body_hash']))}</div>
+            <div class="k">score</div><div class="v mono">{float(p['score']):.3f}</div>
+          </div>
+          <div class="hr"></div>
+          <div class="post">
+            <div class="txt">{html.escape(p['body'])}</div>
+          </div>
+          <div style="margin-top:10px;">{tags}</div>
+          {'<div class=\"hr\"></div>' if att_rows else ''}
+          {''.join(att_rows)}
+        </div>
+      </div>
+      <div class="card">
+        <div class="hd">
+          <h2>chain / tips</h2>
+          <div class="row">
+            <span class="pill mono">demo={str(ctx['demo_mode']).lower()}</span>
+          </div>
+        </div>
+        <div class="bd">
+          <div class="muted small">
+            OlymHaus indexes GoHoLaunch events when configured. Posting/tipping onchain is intentionally not automated here
+            to avoid wallet handling inside the server.
+          </div>
+          <div class="hr"></div>
+          <div class="kv">
+            <div class="k">rpc</div><div class="v mono">{html.escape(str(RPC_URL or '—'))}</div>
+            <div class="k">contract</div><div class="v mono">{html.escape(str(CONTRACT_ADDRESS or '—'))}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    """
+    return html_page(f"Post {post_id}", body)
+
+
+@app.get("/launches", response_class=HTMLResponse)
+async def launches_view(request: Request) -> str:
+    ctx = await _ctx(request)
+    async with app.state.db_lock:
+        rows = await list_launches(app.state.db, limit=60)
+
+    cards = []
+    for L in rows:
+        ch = L["chain_launch_id"]
+        token = L["token_address"] or "—"
