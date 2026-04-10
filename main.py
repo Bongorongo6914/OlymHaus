@@ -1347,3 +1347,74 @@ async def launches_view(request: Request) -> str:
     for L in rows:
         ch = L["chain_launch_id"]
         token = L["token_address"] or "—"
+        creator = L["creator"] or "—"
+        ticker = L["ticker_hash"] or "—"
+        start = iso(int(L["start_at"] or 0)) if L["start_at"] else "—"
+        end = iso(int(L["end_at"] or 0)) if L["end_at"] else "—"
+        cards.append(
+            f"""
+            <div class="post">
+              <div class="meta">
+                <div class="row" style="align-items:center;">
+                  <span class="who">launch</span>
+                  <span class="pill mono">id={html.escape(str(ch))}</span>
+                  <span class="pill mono">token={html.escape(str(token))}</span>
+                </div>
+                <div class="row">
+                  <span class="pill mono">{html.escape(str(start))}</span>
+                  <span class="pill mono">{html.escape(str(end))}</span>
+                </div>
+              </div>
+              <div class="kv" style="margin-top:10px;">
+                <div class="k">creator</div><div class="v mono">{html.escape(str(creator))}</div>
+                <div class="k">tickerHash</div><div class="v mono">{html.escape(str(ticker))}</div>
+              </div>
+            </div>
+            """
+        )
+
+    body = f"""
+    <div class="card" style="margin-top:16px;">
+      <div class="hd">
+        <h2>launches</h2>
+        <div class="row">
+          <span class="pill mono">demo={str(ctx['demo_mode']).lower()}</span>
+          <span class="pill mono">chain={("ok" if ctx["chain_ok"] else "off")}</span>
+        </div>
+      </div>
+      <div class="bd">
+        {''.join(cards) if cards else '<div class="muted">no launches indexed yet.</div>'}
+      </div>
+    </div>
+    """
+    return html_page("Launches", body)
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin(request: Request) -> str:
+    ctx = await _ctx(request)
+    async with app.state.db_lock:
+        cur = await app.state.db.execute(
+            "SELECT id, kind, name, url, lane, enabled, created_at, last_pull_at FROM ingest_sources ORDER BY id ASC"
+        )
+        sources = [dict(r) for r in await cur.fetchall()]
+        cur2 = await app.state.db.execute("SELECT id, handle, created_at FROM local_users ORDER BY id DESC LIMIT 30")
+        users = [dict(r) for r in await cur2.fetchall()]
+        cur3 = await app.state.db.execute("SELECT last_block, last_poll_at FROM chain_cursor WHERE id=1")
+        c = await cur3.fetchone()
+        chain_cursor = {"last_block": int(c[0]), "last_poll_at": int(c[1])} if c else {"last_block": 0, "last_poll_at": 0}
+
+    s_rows = []
+    for s in sources:
+        s_rows.append(
+            f"""
+            <div class="post">
+              <div class="meta">
+                <div class="row">
+                  <span class="pill mono">#{s['id']}</span>
+                  <span class="pill mono">{html.escape(s['kind'])}</span>
+                  <span class="pill mono">{html.escape(s['lane'])}</span>
+                  <span class="pill mono">enabled={int(s['enabled'])}</span>
+                </div>
+                <div class="row">
+                  <form method="post" action="/admin/source/toggle" style="margin:0;">
