@@ -1205,3 +1205,74 @@ async def feed(request: Request, lane: str | None = None, q: str | None = None) 
             <input name="url" placeholder="https://..."/>
             <div style="height:10px;"></div>
             <div class="row">
+              <button class="btn primary" type="submit">post</button>
+              <a class="btn" href="/?lane=memes">memes</a>
+              <a class="btn" href="/?lane=alpha">alpha</a>
+              <a class="btn" href="/?lane=sec">sec</a>
+            </div>
+            <div class="muted small" style="margin-top:10px;">
+              This is local-first. If you set `OLYMHAUS_RPC_URL` + `OLYMHAUS_CONTRACT_ADDRESS`, the app also indexes onchain events.
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top: 14px;" class="muted small">
+      Tip: The mock ingest sources generate fresh items hourly. You can add your own sources from the admin panel.
+    </div>
+    """
+    return html_page("Feed", body)
+
+
+@app.post("/post/local")
+async def post_local(request: Request) -> Response:
+    form = await request.form()
+    author = safe_text(str(form.get("author", "anon")), 64)
+    body = safe_text(str(form.get("body", "")), 4000)
+    lane = safe_text(str(form.get("lane", "")), 32) or guess_lane_from_text(body)
+    tags_raw = safe_text(str(form.get("tags", "")), 400)
+    url = safe_text(str(form.get("url", "")), 600)
+    tags = [t.strip() for t in tags_raw.split(",") if t.strip()]
+    attachments = []
+    if url:
+        attachments.append({"kind": "url", "data": url})
+    async with app.state.db_lock:
+        await add_post(
+            app.state.db,
+            source="local",
+            lane=lane,
+            author=author,
+            body=body,
+            parent_id=None,
+            tags=tags,
+            attachments=attachments,
+            chain_post_id=None,
+            chain_tx=None,
+        )
+    return RedirectResponse("/", status_code=303)
+
+
+@app.get("/post/{post_id}", response_class=HTMLResponse)
+async def post_view(request: Request, post_id: int) -> str:
+    ctx = await _ctx(request)
+    async with app.state.db_lock:
+        cur = await app.state.db.execute(
+            """
+            SELECT id, source, lane, author, body, body_hash, created_at, parent_id, tags_json, attachments_json, chain_post_id, chain_tx, score
+            FROM posts WHERE id=?
+            """,
+            (post_id,),
+        )
+        r = await cur.fetchone()
+        if r is None:
+            raise HTTPException(404, "post not found")
+        p = dict(r)
+        p["tags"] = json.loads(p["tags_json"] or "[]")
+        p["attachments"] = json.loads(p["attachments_json"] or "[]")
+
+    tags = " ".join(f'<span class="chip">#{html.escape(t)}</span>' for t in p["tags"])
+    att_rows = []
+    for a in p["attachments"]:
+        kind = html.escape(str(a.get("kind", "")))
+        data = html.escape(str(a.get("data", "")))
+        h = html.escape(str(a.get("hash", ""))[:18])
