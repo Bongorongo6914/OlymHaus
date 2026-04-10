@@ -1134,3 +1134,74 @@ async def feed(request: Request, lane: str | None = None, q: str | None = None) 
         post_html.append(
             f"""
             <div class="post">
+              <div class="meta">
+                <div class="row" style="align-items:center;">
+                  <span class="who">{who}</span>
+                  <span class="pill mono">{html.escape(p["lane"])}</span>
+                  <span class="pill mono">#{p["id"]}</span>
+                  <span class="pill mono">{iso(int(p["created_at"]))}</span>
+                </div>
+                <div class="row">
+                  <a class="pill" href="/post/{p['id']}">open</a>
+                </div>
+              </div>
+              <div class="txt">{body}</div>
+              <div style="margin-top:10px;">{tags}</div>
+              {att_html}
+            </div>
+            """
+        )
+
+    info = (
+        f'<span class="pill mono">demo={str(ctx["demo_mode"]).lower()}</span>'
+        f'<span class="pill mono">chain={("ok" if ctx["chain_ok"] else "off")}</span>'
+        f'<span class="pill mono">{html.escape(ctx["chain_why"])}</span>'
+    )
+
+    body = f"""
+    <div class="grid">
+      <div class="card">
+        <div class="hd">
+          <h2>feed blender</h2>
+          <div class="row">{info}</div>
+        </div>
+        <div class="bd">
+          <form method="get" action="/">
+            <div class="row">
+              <input name="q" placeholder="search text / author / tags" value="{html.escape(q or '')}"/>
+              <select name="lane">
+                <option value="">all lanes</option>
+                {''.join(f'<option value=\"{html.escape(x[\"lane\"])}\" ' + ('selected' if lane==x['lane'] else '') + f'>{html.escape(x[\"lane\"])} ({x[\"count\"]})</option>' for x in lanes)}
+              </select>
+              <button class="btn primary" type="submit">blend</button>
+            </div>
+          </form>
+          <div class="hr"></div>
+          {''.join(post_html) if post_html else '<div class="muted">no posts yet. wait ~10 seconds for mock ingest.</div>'}
+        </div>
+      </div>
+      <div class="card">
+        <div class="hd">
+          <h2>post something</h2>
+          <div class="row">
+            <a class="pill" href="/admin">admin</a>
+          </div>
+        </div>
+        <div class="bd">
+          <form method="post" action="/post/local">
+            <label class="muted small">author (local)</label>
+            <input name="author" placeholder="anon" value="{html.escape((ctx['me'] or {}).get('handle','anon'))}"/>
+            <div style="height:10px;"></div>
+            <label class="muted small">lane</label>
+            <input name="lane" placeholder="memes / alpha / sec / irl" value="{html.escape(lane or '')}"/>
+            <div style="height:10px;"></div>
+            <label class="muted small">body</label>
+            <textarea name="body" placeholder="drop a post…"></textarea>
+            <div style="height:10px;"></div>
+            <label class="muted small">tags (comma)</label>
+            <input name="tags" placeholder="memes, goho, haus"/>
+            <div style="height:10px;"></div>
+            <label class="muted small">attachment url (optional)</label>
+            <input name="url" placeholder="https://..."/>
+            <div style="height:10px;"></div>
+            <div class="row">
