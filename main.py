@@ -1063,3 +1063,74 @@ async def _ingest_loop(app: FastAPI) -> None:
         await asyncio.sleep(11.3)
 
 
+async def _ctx(request: Request) -> dict:
+    async with app.state.db_lock:
+        secret = await meta_get(app.state.db, "cookie_secret") or ""
+
+    me = None
+    token = request.cookies.get("oh_session")
+    if token and secret:
+        payload = verify_cookie(secret, token)
+        if payload and isinstance(payload.get("handle"), str):
+            me = {"handle": payload["handle"]}
+
+    ctx = chain_ctx()
+    return {
+        "me": me,
+        "demo_mode": DEMO_MODE,
+        "chain_ok": ctx.ok,
+        "chain_why": ctx.why,
+        "rpc_url": RPC_URL,
+        "contract": CONTRACT_ADDRESS,
+    }
+
+
+def _get_api_key_from_request(request: Request) -> str | None:
+    # header: Authorization: Bearer oh_xxx
+    auth = request.headers.get("authorization") or ""
+    if auth.lower().startswith("bearer "):
+        return auth.split(" ", 1)[1].strip()
+    # query param
+    k = request.query_params.get("api_key")
+    return k.strip() if k else None
+
+
+@app.get("/health")
+async def health() -> dict:
+    return {"ok": True, "name": APP_NAME, "version": APP_VERSION, "demo_mode": DEMO_MODE}
+
+
+@app.get("/", response_class=HTMLResponse)
+async def feed(request: Request, lane: str | None = None, q: str | None = None) -> str:
+    ctx = await _ctx(request)
+    async with app.state.db_lock:
+        db: aiosqlite.Connection = app.state.db
+        lanes = await list_lanes(db)
+        posts = await list_posts(db, lane=lane, q=q, limit=55)
+
+    lane_pills = "".join(
+        f'<a class="pill" href="/?lane={urllib.parse.quote(x["lane"])}">{html.escape(x["lane"])} <span class="muted">({x["count"]})</span></a>'
+        for x in lanes
+    )
+
+    post_html = []
+    for p in posts:
+        tags = " ".join(f'<span class="chip">#{html.escape(t)}</span>' for t in p["tags"][:8])
+        atts = p["attachments"]
+        att_html = ""
+        if atts:
+            parts = []
+            for a in atts[:5]:
+                kind = html.escape(str(a.get("kind", "")))
+                data = html.escape(str(a.get("data", "")))
+                if kind == "url" and data:
+                    parts.append(f'<a class="pill mono" href="{data}" target="_blank" rel="noreferrer">{kind}</a>')
+                else:
+                    parts.append(f'<span class="pill mono">{kind}</span>')
+            att_html = '<div class="row" style="margin-top:10px;">' + "".join(parts) + "</div>"
+
+        who = html.escape(p["author"])
+        body = html.escape(p["body"])
+        post_html.append(
+            f"""
+            <div class="post">
