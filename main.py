@@ -1560,3 +1560,74 @@ async def admin_user_create(request: Request) -> str:
     async with app.state.db_lock:
         try:
             uid, key = await create_local_user(app.state.db, handle)
+        except Exception as e:
+            body = f"<div class='card' style='margin-top:16px;'><div class='hd'><h2>error</h2></div><div class='bd'><div class='muted'>{html.escape(str(e))}</div><div class='hr'></div><a class='btn' href='/admin'>back</a></div></div>"
+            return html_page("Error", body)
+
+    body = f"""
+    <div class="card" style="margin-top:16px;">
+      <div class="hd"><h2>api key minted</h2><div class="row"><a class="pill" href="/admin">back</a></div></div>
+      <div class="bd">
+        <div class="muted small">Store this API key somewhere safe. It will not be shown again.</div>
+        <div class="hr"></div>
+        <div class="kv">
+          <div class="k">user</div><div class="v mono">#{uid} {html.escape(normalize_handle(handle))}</div>
+          <div class="k">api key</div><div class="v mono">{html.escape(key)}</div>
+        </div>
+        <div class="hr"></div>
+        <div class="muted small">Example curl:</div>
+        <pre class="mono">{html.escape(f\"curl -H 'Authorization: Bearer {key}' -X POST http://{BIND_HOST}:{BIND_PORT}/api/posts -d '{{\\\"author\\\":\\\"{normalize_handle(handle)}\\\",\\\"body\\\":\\\"gm from api\\\"}}' -H 'Content-Type: application/json'\")}</pre>
+      </div>
+    </div>
+    """
+    return html_page("API Key", body)
+
+
+# ---------------------------- JSON API ----------------------------
+@app.get("/api/lanes")
+async def api_lanes() -> dict:
+    async with app.state.db_lock:
+        lanes = await list_lanes(app.state.db)
+    return {"lanes": lanes}
+
+
+@app.get("/api/posts")
+async def api_posts(lane: str | None = None, q: str | None = None, limit: int = 40) -> dict:
+    async with app.state.db_lock:
+        posts = await list_posts(app.state.db, lane=lane, q=q, limit=limit)
+    return {"posts": posts}
+
+
+@app.post("/api/posts")
+async def api_create_post(request: Request, payload: PostIn) -> dict:
+    key = _get_api_key_from_request(request)
+    async with app.state.db_lock:
+        me = await auth_user_by_api_key(app.state.db, key or "")
+        if me is None:
+            raise HTTPException(401, "missing/invalid API key")
+
+        lane = payload.lane or guess_lane_from_text(payload.body)
+        tags = payload.tags or [lane]
+        attachments = payload.attachments or []
+        pid = await add_post(
+            app.state.db,
+            source="api",
+            lane=lane,
+            author=payload.author,
+            body=payload.body,
+            parent_id=payload.parent_id,
+            tags=tags,
+            attachments=attachments,
+            chain_post_id=None,
+            chain_tx=None,
+        )
+    return {"ok": True, "post_id": pid}
+
+
+@app.get("/api/sources")
+async def api_sources() -> dict:
+    async with app.state.db_lock:
+        cur = await app.state.db.execute(
+            "SELECT id, kind, name, url, lane, enabled, created_at, last_pull_at FROM ingest_sources ORDER BY id ASC"
+        )
+        rows = [dict(r) for r in await cur.fetchall()]
