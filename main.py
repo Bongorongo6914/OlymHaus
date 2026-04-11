@@ -1631,3 +1631,74 @@ async def api_sources() -> dict:
             "SELECT id, kind, name, url, lane, enabled, created_at, last_pull_at FROM ingest_sources ORDER BY id ASC"
         )
         rows = [dict(r) for r in await cur.fetchall()]
+    return {"sources": rows}
+
+
+@app.post("/api/sources")
+async def api_add_source(request: Request, payload: SourceIn) -> dict:
+    key = _get_api_key_from_request(request)
+    async with app.state.db_lock:
+        me = await auth_user_by_api_key(app.state.db, key or "")
+        if me is None:
+            raise HTTPException(401, "missing/invalid API key")
+        await app.state.db.execute(
+            "INSERT INTO ingest_sources(kind, name, url, lane, enabled, created_at) VALUES(?,?,?,?,?,?)",
+            (
+                safe_text(payload.kind, 16).lower(),
+                safe_text(payload.name, 80),
+                safe_text(payload.url, 400),
+                safe_text(payload.lane, 32).lower(),
+                1 if payload.enabled else 0,
+                now_ts(),
+            ),
+        )
+        await app.state.db.commit()
+    return {"ok": True}
+
+
+@app.get("/api/chain")
+async def api_chain() -> dict:
+    ctx = chain_ctx()
+    out = {
+        "demo_mode": DEMO_MODE,
+        "ok": ctx.ok,
+        "why": ctx.why,
+        "rpc_url": RPC_URL,
+        "contract": CONTRACT_ADDRESS,
+    }
+    async with app.state.db_lock:
+        cur = await app.state.db.execute("SELECT last_block, last_poll_at FROM chain_cursor WHERE id=1")
+        row = await cur.fetchone()
+        out["cursor"] = {"last_block": int(row[0]), "last_poll_at": int(row[1])} if row else {"last_block": 0, "last_poll_at": 0}
+    return out
+
+
+# ---------------------------- RUNNER ----------------------------
+def _print_banner() -> None:
+    mode = "DEMO" if DEMO_MODE else "CHAIN"
+    lines = [
+        f"{APP_NAME} v{APP_VERSION}",
+        f"mode: {mode}",
+        f"db: {DB_PATH}",
+        f"bind: http://{BIND_HOST}:{BIND_PORT}",
+    ]
+    if not DEMO_MODE:
+        lines.append(f"rpc: {RPC_URL}")
+        lines.append(f"contract: {CONTRACT_ADDRESS}")
+    else:
+        lines.append("chain indexing: disabled (set OLYMHAUS_RPC_URL + OLYMHAUS_CONTRACT_ADDRESS, install web3)")
+    print("\n".join(lines))
+
+
+def main() -> None:
+    _print_banner()
+    try:
+        import uvicorn  # type: ignore
+    except Exception as e:  # pragma: no cover
+        raise SystemExit("Missing dependency: uvicorn. Install with: pip install uvicorn\n" f"Import error: {e}")
+
+    uvicorn.run("olymhaus:app", host=BIND_HOST, port=BIND_PORT, reload=False, log_level="info")
+
+
+if __name__ == "__main__":
+    main()
