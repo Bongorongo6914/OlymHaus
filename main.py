@@ -1418,3 +1418,74 @@ async def admin(request: Request) -> str:
                 </div>
                 <div class="row">
                   <form method="post" action="/admin/source/toggle" style="margin:0;">
+                    <input type="hidden" name="id" value="{s['id']}"/>
+                    <input type="hidden" name="on" value="{0 if s['enabled'] else 1}"/>
+                    <button class="btn" type="submit">{'disable' if s['enabled'] else 'enable'}</button>
+                  </form>
+                </div>
+              </div>
+              <div class="txt"><b>{html.escape(s['name'])}</b><br/><span class="mono">{html.escape(s['url'])}</span></div>
+              <div class="muted small" style="margin-top:10px;">
+                created {iso(int(s['created_at']))}
+                {' | last pull ' + iso(int(s['last_pull_at'])) if s.get('last_pull_at') else ''}
+              </div>
+            </div>
+            """
+        )
+
+    u_rows = []
+    for u in users:
+        u_rows.append(
+            f"<div class='post'><div class='meta'><div class='row'><span class='pill mono'>user#{u['id']}</span><span class='pill mono'>{html.escape(u['handle'])}</span></div><div class='row'><span class='pill mono'>{iso(int(u['created_at']))}</span></div></div></div>"
+        )
+
+    body = f"""
+    <div class="grid" style="margin-top:16px;">
+      <div class="card">
+        <div class="hd">
+          <h2>ingest sources</h2>
+          <div class="row">
+            <form method="post" action="/admin/ingest/pull" style="margin:0;">
+              <button class="btn primary" type="submit">pull now</button>
+            </form>
+            <form method="post" action="/admin/ingest/import" style="margin:0;">
+              <button class="btn" type="submit">import now</button>
+            </form>
+          </div>
+        </div>
+        <div class="bd">
+          <div class="muted small">Mock sources do not hit the network; they generate content locally. Add real sources by URL if you want.</div>
+          <div class="hr"></div>
+          <form method="post" action="/admin/source/add">
+            <div class="row">
+              <input name="kind" placeholder="kind (mock/rss)" value="mock"/>
+              <input name="name" placeholder="name" value="MyWire-{rand_slug(6)}"/>
+            </div>
+            <div style="height:10px;"></div>
+            <div class="row">
+              <input name="url" placeholder="url (mock://... or https://...)" value="mock://custom-{rand_slug(8)}"/>
+              <input name="lane" placeholder="lane" value="general"/>
+            </div>
+            <div style="height:10px;"></div>
+            <div class="row">
+              <button class="btn primary" type="submit">add source</button>
+            </div>
+          </form>
+          <div class="hr"></div>
+          {''.join(s_rows) if s_rows else '<div class="muted">no sources.</div>'}
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="hd">
+          <h2>local users + chain cursor</h2>
+          <div class="row">
+            <span class="pill mono">demo={str(ctx['demo_mode']).lower()}</span>
+            <span class="pill mono">cursor={chain_cursor['last_block']}</span>
+          </div>
+        </div>
+        <div class="bd">
+          <div class="kv">
+            <div class="k">rpc</div><div class="v mono">{html.escape(str(RPC_URL or '—'))}</div>
+            <div class="k">contract</div><div class="v mono">{html.escape(str(CONTRACT_ADDRESS or '—'))}</div>
+            <div class="k">last poll</div><div class="v mono">{iso(int(chain_cursor['last_poll_at'])) if chain_cursor['last_poll_at'] else '—'}</div>
