@@ -1489,3 +1489,74 @@ async def admin(request: Request) -> str:
             <div class="k">rpc</div><div class="v mono">{html.escape(str(RPC_URL or '—'))}</div>
             <div class="k">contract</div><div class="v mono">{html.escape(str(CONTRACT_ADDRESS or '—'))}</div>
             <div class="k">last poll</div><div class="v mono">{iso(int(chain_cursor['last_poll_at'])) if chain_cursor['last_poll_at'] else '—'}</div>
+          </div>
+          <div class="hr"></div>
+          <form method="post" action="/admin/user/create">
+            <label class="muted small">Create a local user (gives an API key)</label>
+            <div style="height:10px;"></div>
+            <div class="row">
+              <input name="handle" placeholder="handle" value="haus_{rand_slug(6)}"/>
+              <button class="btn primary" type="submit">create</button>
+            </div>
+          </form>
+          <div class="hr"></div>
+          {''.join(u_rows) if u_rows else '<div class="muted">no users yet.</div>'}
+        </div>
+      </div>
+    </div>
+    """
+    return html_page("Admin", body)
+
+
+@app.post("/admin/source/add")
+async def admin_source_add(request: Request) -> Response:
+    form = await request.form()
+    kind = safe_text(str(form.get("kind", "mock")), 16).lower()
+    name = safe_text(str(form.get("name", "source")), 80)
+    url = safe_text(str(form.get("url", "")), 400)
+    lane = safe_text(str(form.get("lane", "general")), 32).lower()
+    enabled = 1
+    if not url:
+        raise HTTPException(400, "url required")
+    async with app.state.db_lock:
+        await app.state.db.execute(
+            "INSERT INTO ingest_sources(kind, name, url, lane, enabled, created_at) VALUES(?,?,?,?,?,?)",
+            (kind, name, url, lane, enabled, now_ts()),
+        )
+        await app.state.db.commit()
+    return RedirectResponse("/admin", status_code=303)
+
+
+@app.post("/admin/source/toggle")
+async def admin_source_toggle(request: Request) -> Response:
+    form = await request.form()
+    sid = int(form.get("id", "0"))
+    on = int(form.get("on", "0"))
+    on = 1 if on else 0
+    async with app.state.db_lock:
+        await app.state.db.execute("UPDATE ingest_sources SET enabled=? WHERE id=?", (on, sid))
+        await app.state.db.commit()
+    return RedirectResponse("/admin", status_code=303)
+
+
+@app.post("/admin/ingest/pull")
+async def admin_ingest_pull() -> Response:
+    async with app.state.db_lock:
+        await ingest_pull_once(app.state.db)
+    return RedirectResponse("/admin", status_code=303)
+
+
+@app.post("/admin/ingest/import")
+async def admin_ingest_import() -> Response:
+    async with app.state.db_lock:
+        await import_ingest_items(app.state.db, limit=50)
+    return RedirectResponse("/admin", status_code=303)
+
+
+@app.post("/admin/user/create", response_class=HTMLResponse)
+async def admin_user_create(request: Request) -> str:
+    form = await request.form()
+    handle = safe_text(str(form.get("handle", "")), 64)
+    async with app.state.db_lock:
+        try:
+            uid, key = await create_local_user(app.state.db, handle)
